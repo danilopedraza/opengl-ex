@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h> // put before to avoid visual studio bug (in windows)
 #include <GL/glew.h>
@@ -26,6 +27,14 @@ static struct {
 
     GLfloat fade_factor;
 } g_resources;
+
+static const GLfloat g_vertex_buffer_data[] = {
+    -1.0f, -1.0f,
+     1.0f, -1.0f,
+    -1.0f,  1.0f,
+     1.0f,  1.0f
+};
+static const GLushort g_element_buffer_data[] = { 0, 1, 2, 3 };
 
 static GLuint make_buffer(
     GLenum target,
@@ -98,6 +107,33 @@ static GLuint make_shader(GLenum type, const char *filename) {
     return shader;
 }
 
+static GLuint make_texture(const char *filename) {
+    GLuint texture;
+    int width, height;
+    void *pixels = read_tga(filename, &width, &height);
+
+    if (!pixels)
+        return 0;
+
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
+
+    glTexImage2D(
+        GL_TEXTURE_2D, 0,           /* target, level of detail */
+        GL_RGB8,                    /* internal format */
+        width, height, 0,           /* width, height, border */
+        GL_BGR, GL_UNSIGNED_BYTE,   /* external format, type */
+        pixels                      /* pixels */
+    );
+    free(pixels);
+    return texture;
+}
+
 static int make_resources(void) {
     g_resources.vertex_buffer = make_buffer(
         GL_ARRAY_BUFFER,
@@ -159,50 +195,49 @@ static int make_resources(void) {
 }
 
 
-static GLuint make_texture(const char *filename) {
-    GLuint texture;
-    int width, height;
-    void *pixels = read_tga(filename, &width, &height);
 
-    if (!pixels)
-        return 0;
 
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T    , GL_CLAMP_TO_EDGE);
-
-    glTexImage2D(
-        GL_TEXTURE_2D, 0,           /* target, level of detail */
-        GL_RGB8,                    /* internal format */
-        width, height, 0,           /* width, height, border */
-        GL_BGR, GL_UNSIGNED_BYTE,   /* external format, type */
-        pixels                      /* pixels */
-    );
-    free(pixels);
-    return texture;
+static void update_fade_factor(void) {
+    int milliseconds = glutGet(GLUT_ELAPSED_TIME);
+    g_resources.fade_factor = sinf((float)milliseconds * 0.001f) * 0.5f + 0.5f;
+    glutPostRedisplay();
 }
-
-static void update_fade_factor(void) {}
 
 static void render(void) {
     glUseProgram(g_resources.program);
+    
     glUniform1f(g_resources.uniforms.fade_factor, g_resources.fade_factor);
-    // current point
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_resources.textures[0]);
+    glUniform1i(g_resources.uniforms.textures[0], 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, g_resources.textures[1]);
+    glUniform1i(g_resources.uniforms.textures[1], 1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, g_resources.vertex_buffer);
+    glVertexAttribPointer(
+        g_resources.attributes.position, // attribute
+        2,                               // size
+        GL_FLOAT,                        // type
+        GL_FALSE,                        // normalize values or not
+        sizeof(GLfloat)*2,               // stride
+        (void*)0                         // buffer offset
+    );
+    glEnableVertexAttribArray(g_resources.attributes.position);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_resources.element_buffer);
+    glDrawElements(
+        GL_TRIANGLE_STRIP, // mode
+        4,                 // count
+        GL_UNSIGNED_SHORT, // type
+        (void*) 0          // buffer offset
+    );
+    glDisableVertexAttribArray(g_resources.attributes.position);
+
+    glutSwapBuffers();
 }
-
-
-static const GLfloat g_vertex_buffer_data[] = {
-    -1.0f, -1.0f,
-     1.0f, -1.0f,
-    -1.0f,  1.0f,
-     1.0f,  1.0f
-};
-static const GLushort g_element_buffer_data[] = { 0, 1, 2, 3 };
-
 
 int main(int argc, char** argv) {
     glutInit(&argc, argv);
@@ -231,7 +266,5 @@ int main(int argc, char** argv) {
 
 /*
 compile (in linux) with:
-gcc -o main hello-gl.c \
-    -I/usr/X11R6/include -L/usr/X11R6/lib \
-    -lGL -lGLEW -lglut
+make -f Makefile.Unix
 */
